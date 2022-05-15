@@ -1,0 +1,594 @@
+---
+title: "52414 - lab 1 Solutions"
+output: html_document
+date: '2022-05-15'
+---
+
+# *Lab 1: Basic Data Wrangling and Plotting, Distributions*  
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+# Loading our libraries for this lab
+
+Packages <- c("tidyverse","dplyr", "data.table","rworldmap","ggthemes", "reshape2" ,"ggplot2","e1071")
+lapply(Packages, library, character.only = TRUE)
+
+options(scipen = 999)
+```
+
+
+## Question 1
+
+In our solution of question 1,  three 5x2 matrix data frames are returned. 
+They include the top 5 dates with the highest new cases, deaths, and vaccinations, respectively.
+In the beginning, we read the csv file which we downloaded when we started working on this lab and named it "cases".
+We then filtered it based on high income countries three times, once for each of the three variables.
+We used the built-in head function to display the top 5 dates. 
+
+Loading the data and modifying the date:
+
+```{r} 
+
+cases <- read.csv("C:/Users/shaym/Downloads/owid-covid-data.csv")
+
+cases$date = as.Date(cases$date, format = "%m/%d/%Y")
+class(cases$date)
+```
+
+Listing five top dates:
+
+```{r, warning=FALSE}
+# List in a table the top five dates in terms of number of new_cases for High income countries
+new_cases <- cases %>% select(date,location, new_cases) %>% filter(location == 'High income') %>% select(date,new_cases) %>% arrange(desc(new_cases))
+head(new_cases,5)
+
+# List in a table the top five dates in terms of number of new_deaths for High income countries
+new_deaths <- cases %>% select(date,location, new_deaths) %>% filter(location == 'High income') %>% select(date,new_deaths) %>% arrange(desc(new_deaths))
+head(new_deaths,5)
+
+# List in a table the top five dates in terms of number of new_deaths for High income countries
+new_vaccinations <- cases %>% select(date,location, new_vaccinations) %>% filter(location == 'High income') %>% select(date,new_vaccinations) %>% arrange(desc(new_vaccinations))
+head(new_vaccinations,5)
+```
+
+### Analysis and description of results:
+
+From the results, we can see that the dates with the highest numbers of new cases all took place in January of 2022, and it makes sense given that the highly contagious omicron variant of COVID-19 was at its peak and restrictions on the local level and regarding traveling were slowly loosening.
+On the contrary, the dates with the highest numbers of deaths took place in January of 2021, only 10 months after the pandemic began and several months before vaccinations were available. 
+The dates with the highest numbers of vaccinations all occur in the second half of 2021 when vaccination campaigns worldwide were starting.
+
+
+
+## Question 2
+
+In this question we wrote a function that creates a plot that compares between high income and low income countries based on a specific variable.
+We loaded the packages that we need and proceeded with creating a function whose parameters are a data frame and a column. The function would filter the data frame based on high income and low income and then plot the both variables.
+In (b) we applied the log function to the smoothed versions of total cases, deaths, and vaccinations.
+In total, this questions returned 4 graphs.
+
+```{r, warning=FALSE, error=FALSE, message=FALSE} 
+# a. Comparing low vs. high income countries
+
+compare_low_high <- function(dataframe, col){
+  high <- cases %>% select(date, location, col) %>% filter(location == 'High income')
+  low <- cases %>% select(date, location, col) %>% filter(location == 'Low income')
+  
+  high_df <- select(high, date, col)
+  low_df <- select(low, date, col)
+  
+  # merge two dataframe and omit all NA values
+  high_low_df <- na.omit(merge(high_df, low_df, by="date")) 
+  
+  # change names
+  setnames(high_low_df, c('date', 'high_income', 'low_income')) 
+
+  data_high_low <- reshape2::melt(high_low_df, id="date")  # convert to long format
+  
+ # plot
+  ggplot(data=data_high_low, aes(x=date, y= value, colour=as.factor(variable))) + 
+    ggtitle('Comparing low vs. high income countries')+ ylab(col) + labs(colour="Location") + 
+    geom_point(alpha=0.3) + 
+    geom_line() 
+}
+
+# b
+compare_low_high(cases,'new_cases_per_million')
+
+cases$log_new_cases_smoothed_per_million <- log(cases$new_cases_smoothed_per_million)
+compare_low_high(cases,'log_new_cases_smoothed_per_million')
+
+
+cases$log_new_deaths_smoothed <- log(cases$new_deaths_smoothed_per_million)
+compare_low_high(cases,'new_deaths_smoothed_per_million')
+
+cases$log_new_vaccinations_smoothed <- log(cases$new_vaccinations_smoothed_per_million)
+compare_low_high(cases,'new_vaccinations_smoothed_per_million')
+
+```
+
+### Analysis and description of results:
+
+In the plot of (a), we can see that high income countries noticeably had more new cases per million than low income countries. This could be explained by insufficient testing being carried out in low income countries. The plot of the logarithmic version of the smoothed new cases column shows a similar pattern albeit less intense than the non-logarithmic version and that is due to smoothing being an estimate that systematically takes out statistical outliers.
+
+The plot of the logarithmic smoothed new vaccinations is interesting as it shows that high income countries start out very high around March 2021 then the end of the line in April 2022 is a bit lower than when it started. That is not the case with low income countries which start out very low and progressively increase to record high new vaccinations that are almost identical to high income countries.
+
+In the first 3 graphs, the lines of high income and low income countries in any of the graphs do not cross; in all of these graphs high income countries reported higher new cases, deaths, and vaccinations. This could be a powerful indicator of inequality - high income countries have more resources and therefore they have better testing and vaccine supply, in addition to a more transparent reporting of cases and deaths. That is not the case however in the last graph of new monthly vaccinations, and that is sensible since high income countries already had their peak in vaccine supply to their citizens way earlier than low income countries and therefore the intersection in late 2021/early 2022 only strengthens our claim regarding inequality.
+
+
+## Question 3
+
+In this question, we created a data frame called "current" that includes the most recent values of each countries for each of the requested columns.
+We did that by sorting the data frame based on the date followed by the country, which allowed us to take the most recent value for each country, and that was after cleaning each column separately from NA values and then merging them together.
+In (b) we created a histogram of total deaths per million and calculated the skewness and kurtosis of the data.
+In (c) we plotted the total number of deaths as a function of the total number of cases.
+
+```{r, warning=FALSE, message=FALSE}
+
+# a)
+
+cases_subset = select(cases, location, continent, date, total_cases_per_million, 
+                      total_deaths_per_million, total_vaccinations_per_hundred, 
+                      people_fully_vaccinated_per_hundred, total_boosters_per_hundred, 
+                      excess_mortality_cumulative_per_million)
+
+cases_sorted <- cases_subset %>% arrange(desc(date))
+cases_sorted <- cases_sorted %>% arrange(desc(location))
+
+total_cases <- na.omit(select(cases_sorted, c('location', 'continent', 'total_cases_per_million')))
+total_cases_one_country <- total_cases[!duplicated(total_cases$location),]
+
+total_deaths <- na.omit(select(cases_sorted, c('location', 'continent', 'total_deaths_per_million')))
+total_deaths_one_country <- total_deaths[!duplicated(total_deaths$location),]
+
+total_vaccinations <- na.omit(select(cases_sorted, c('location', 'continent', 
+                                                     'total_vaccinations_per_hundred')))
+total_vaccinations_one_country <- total_vaccinations[!duplicated(total_vaccinations$location),]
+
+people_fully_vaccinated <- na.omit(select(cases_sorted, c('location', 'continent', 
+                                                          'people_fully_vaccinated_per_hundred')))
+people_fully_vaccinated_one_country <- 
+  people_fully_vaccinated[!duplicated(people_fully_vaccinated$location),]
+
+total_boosters <- na.omit(select(cases_sorted, c('location', 'continent', 
+                                                 'total_boosters_per_hundred')))
+total_boosters_one_country <- total_boosters[!duplicated(total_boosters$location),]
+
+excess_mortality <- na.omit(select(cases_sorted, c('location', 'continent', 
+                                                   'excess_mortality_cumulative_per_million')))
+excess_mortality_one_country <- excess_mortality[!duplicated(excess_mortality$location),]
+
+dfs <- list(total_cases_one_country, total_deaths_one_country, total_vaccinations_one_country, 
+                 people_fully_vaccinated_one_country, total_boosters_one_country, 
+                 excess_mortality_one_country)
+
+current <- dfs %>% reduce(full_join, by=c("location", 'continent'))
+
+
+```
+
+
+```{r, warning=FALSE}
+#b
+
+ggplot(current, aes(x=total_deaths_per_million)) + 
+  geom_histogram(binwidth=30, color="darkblue", fill="lightblue") + 
+  labs(title="Histogram of total deaths per million") + 
+  xlab("Total deaths per million")
+
+
+death_skewness <- skewness(na.omit(current$total_deaths_per_million))
+cat("The skewness of the distribution equals", death_skewness, ".\n")
+
+death_kurtosis <- kurtosis(na.omit(current$total_deaths_per_million))
+cat("The kurtosis of this distribution equals", death_kurtosis, ".\n")
+
+dist_median <- median(current$total_deaths_per_million, na.rm = TRUE)
+cat("The median of total deaths per million equals", dist_median, ".")
+
+```
+
+### Analysis and description of results:
+
+The histogram does not resemble the normal distribution. It has a long right tail meaning it is a right-skewed distribution. This is strengthened by the fact that the skewness of the distribution is greater than 1 (1.3) meaning that it is a substantially skewed distribution. Similarly, the kurtosis of the distribution was also greater than 1 (1.6) meaning that it is too peaked. Both of these results indicate a non-normal distribution.
+
+```{r, warning=TRUE}
+
+# c)
+
+linear_line <- lm(current$total_deaths_per_million~current$total_cases_per_million)
+linear_line_slope <- linear_line$coefficients[2]
+
+
+ggplot(current,aes(total_cases_per_million, total_deaths_per_million)) +
+  geom_point() +
+  geom_smooth(method='lm', se=FALSE) +
+  ggtitle("Total number of deaths explained by the total number of cases") +xlab("Total number of cases") + ylab("Total number of deaths")
+
+```
+
+### Analysis and description of results:
+
+The plot of the total number of deaths as a function of the total number of cases demonstrated a positive relationship, meaning that an increase in the number of deaths is correlated with an increase in the number of cases. That is strengthened by the positive slope 0.0041.
+
+
+## Question 4
+
+Question 4 yields two continent-centered figures: a boxplot of the number of vaccinations per continent and a graph of the ratio of boosted and fully vaccinated people over time in every continent.
+
+```{r} 
+# a)
+
+total_vac_with_continent <- subset(total_vaccinations_one_country, continent != "")
+vac_bp <- boxplot(total_vac_with_continent$total_vaccinations_per_hundred~total_vac_with_continent$continent,data=total_vac_with_continent, main="Boxplot of number of vaccinations per continent", xlab="Continents", ylab="Total number of vaccinations")
+
+```
+
+
+```{r}
+
+# b)
+
+cases$booster_ratio <- cases$total_boosters/cases$people_fully_vaccinated
+valid_continents <- c("Europe", "Africa", "North America", "South America", "Asia", "Oceania")
+booster_ratio_date <- subset(na.omit(cases[c("date", "location", "booster_ratio")]))
+booster_ratio_date <- filter(booster_ratio_date, location %in% valid_continents)
+ggplot(data=booster_ratio_date, 
+       mapping = aes(x=date, y=booster_ratio,
+                     colour=as.factor(location))) + 
+  geom_point(alpha=0.3) + 
+  labs(title = "Ratio of boosted & fully vaccinated people over time in different continents", 
+       colour="Continents", x="Time", y="Booster ratio")
+```
+
+### Analysis and description of results:
+
+The boxplot in (a) expands on our analysis in question 2 in which we stated that low income countries do not have the same resources as high income countries to combat COVID-19 properly, and this is starkly obvious in the boxplot as Africa has the most compact box and the lowest median. This is also illustrated in the second figure in which Africa has the lowest ratio of boosted and fully vaccinated people (<0.2) till today, compared to Europe which has a 0.6 ratio today.
+
+
+## Question 5 
+
+In this question, we plotted for each country the monthly cases, deaths, and vaccinations per million from January 2020 until March 2022.
+
+```{r, warning=FALSE ,message=FALSE} 
+
+year_month_df <- cases %>% select(location, date, new_cases_per_million, new_deaths, new_vaccinations) %>% mutate(Months = format(as.Date(date), "%Y-%m" )) %>% group_by(location, Months) %>% summarise(monthly_new_cases = sum(new_cases_per_million, na.rm=TRUE),
+monthly_new_deaths = sum(new_deaths, na.rm=TRUE),monthly_new_vaccinations = sum(new_vaccinations, na.rm=TRUE))
+
+```
+
+```{r, warning=FALSE}
+
+# b
+year_month_df %>% ggplot(aes(x=Months, y=monthly_new_cases, fill=Months)) + geom_boxplot() + ggtitle("Monthly cases per million") + ylab('New monthly cases per million')
+
+year_month_df %>% ggplot(aes(x=Months, y=monthly_new_deaths, fill=Months)) + geom_boxplot() + ggtitle("Monthly deaths per million") + ylab('New monthly deaths per million') + xlab('Time (year-month)') +ylim(0,100)
+
+
+year_month_df %>% ggplot(aes(x=Months, y=monthly_new_vaccinations, fill=Months)) + geom_boxplot() + ggtitle("Monthly vaccinations per million") + ylab('New monthly vaccinations per million') + xlab('Time (year-month)') +ylim(0,1000000)
+
+```
+
+### Analysis and description of results:
+
+In the "monthly new cases boxplot", we can see that at the beginning of 2020 there were little new cases, after that in 2021 it started to rise, and then in early 2022, we have a jump in the number of the new cases: the boxplot range of January 2022 is the largest as countries with a large population had loosened their restrictions, such as the US which recorded record high number of cases per day since the beginning of the pandemic.
+
+In the "monthly new deaths boxplot", we can see there are many observations that are numerically distant from the rest of the data, we can see that at the beginning of 2020 there were a little number of deaths, then suddenly it's started to increase in the middle of 2020, then it's continued to increase in 2021 when reached its height, then in March and April of 2022 it started to decrease and return to the initial rate.
+We hypothesize that the slight jump in the median of monthly deaths per million from mid-2021 till early 2022 is due to the new variants such as the highly contagious and vicious Delta variant which had its peak between May 2021 and November 2021, and the Omicron variant later on.
+
+In the "monthly new vaccinations boxplot", we obviously see that there were no vaccinations in 2020 because COVID-19 was a new disease, then when the vaccination campaigns began around the world, the number of vaccination started to rise from the first quarter of 2021 until the last quarter. 2022 recorded very low monthly vaccinations per million as most people had already been vaccinated before, so it is an expected decrease.
+
+
+## Question 6
+
+In this question, we created a new column for the disease reproduction number called "R", which is defined as the "expected number of cases directly generated by one case in a population where all individuals are susceptible to infection". We did that by dividing each number of new cases by the number of new cases a week earlier. We focused on three countries: US, UK and Israel.
+Later, we plotted the disease reproduction number over time for each of these countries.
+
+```{r, warning=FALSE} 
+
+# 6 - Preparation
+
+new_cases_smoothed_1 <- select(cases, date, new_cases_smoothed)
+new_cases_smoothed_2 <- new_cases_smoothed_1[-c(1:7), ]  ## shorter length
+
+cases <- mutate(cases, R_cases = new_cases_smoothed_2$new_cases_smoothed/new_cases_smoothed_1$new_cases_smoothed)
+
+
+R_cases <- na.omit(cases %>% select(date,location,R_cases) %>% filter(location == c('Israel','United Kingdom','United States')))
+
+R_cases <- mutate(R_cases, date = format(as.Date(date), "%Y-%m" ))
+
+# head(R_cases)
+
+```
+
+
+```{r, warning=FALSE}
+
+# 6 - Plot
+
+locations = c('Israel','United Kingdom','United States' )
+
+cases %>% select(location, R_cases,date) %>% filter(location %in% locations) %>% ggplot(aes(x=date, y= R_cases, color = location)) +ylim(0,20)+ geom_point(size=2, alpha = 0.3)+geom_line(alpha=0.3)
+
+
+
+Israel <- cases %>% select(date,location,R_cases) %>% filter(location == 'Israel')
+UK <- cases %>% select(date,location,R_cases) %>% filter(location == 'United Kingdom')
+US <- cases %>% select(date,location,R_cases) %>% filter(location == 'United States')
+
+israel <- na.omit(select(Israel, date,R_cases))
+uk <- na.omit(select(UK, date, R_cases))
+us <- na.omit(select(US, date, R_cases))
+
+israel[-1] <- lapply(israel[-1], as.numeric)
+val1 = sum(israel[,-1] > 1, na.rm=TRUE)
+uk[-1] <- lapply(uk[-1], as.numeric)
+val2 = sum(uk[,-1] > 1, na.rm=TRUE)
+us[-1] <- lapply(us[-1], as.numeric)
+val3 = sum(us[,-1] > 1, na.rm=TRUE)
+
+location <- c('Israel','United Kingdom','United States')
+number_of_days <- c(val1,val2, val3)
+the_number_of_days <- data.frame(location, number_of_days)
+the_number_of_days
+
+```
+
+### Analysis and description of results:
+
+Interestingly, we can see from the plot that Israel has out-peaked both the US and the UK in the disease reproduction rate several times. The UK out-peaked the other 2 countries a lot more than Israel but not as many times as the US. The US leading in the rate of infection makes sense given that the US has a larger population than the other 2 countries, but it is interesting nevertheless that Israel still managed to outpeak both countries even though it is 1/6 the size of the UK and 1/30 the size of the US; this shows how great the rate of infection at several periods of the pandemic. We hypothesize that the later peaks of Israel in the plot are due to the different waves caused by the new varients, these peaks rightfully justified lockdowns and strict restrictions.
+
+
+## Question 7
+
+This question yields 3 maps, each containing a different variable. The intensity of the color indicates high values of the given variable.
+
+```{r, warning=FALSE, error=FALSE} 
+
+world <- joinCountryData2Map(current, joinCode = "NAME", nameJoinColumn = "location")
+
+```
+
+```{r, warning=FALSE}
+
+mapCountryData(world, nameColumnToPlot = "total_deaths_per_million", catMethod = "quantiles", colourPalette = "viridis", addLegend = TRUE, mapTitle = "Total deaths per million around the world", aspect = 'variable', missingCountryCol = 'white')
+
+```
+
+
+The map of total deaths per million shows how most of Africa and China have the least number of total deaths per million and that could be an indicator of either under-reporting of new deaths (most probably the case in Africa) or actual exceptional control of the pandemic (probably the case of China).
+
+```{r, warning=FALSE}
+mapCountryData(world, nameColumnToPlot = "total_vaccinations_per_hundred", catMethod = "quantiles", colourPalette = "viridis", addLegend = TRUE, mapTitle = "Total vaccinations per hundred", aspect = 'variable', missingCountryCol = 'white')
+```
+
+
+The map of total vaccinations per hundred clearly illustrates the inequality in vaccine supply, where high income countries such as western Europe and North America are colored in intense red while Africa which is mostly colored in bright yellow. 
+
+```{r, warning=FALSE}
+mapCountryData(world, nameColumnToPlot = "excess_mortality_cumulative_per_million", catMethod = "quantiles", colourPalette = "heat", addLegend = TRUE, mapTitle = "Cumulative excess mortality per million", aspect = 'variable', missingCountryCol = 'white')
+```
+
+
+Despite the absence of data, excess mortality can also be a good indicator of how well a country is handling the pandemic, since some countries such as Canada and Australia have reached negative excess mortality numbers.
+
+```{r, warning=FALSE}
+#top_three_countries
+var1 <- head(select(current %>% arrange(desc(total_deaths_per_million)) ,location),3)
+var2 <- head(select(current %>% arrange(desc(total_vaccinations_per_hundred)) ,location),3)
+var3 <- head(select(current %>% arrange(desc(excess_mortality_cumulative_per_million)),location),3)
+
+df_top_three <- data.frame(var1, var2, var3)
+colnames(df_top_three) <- c('top_three_deaths', 'top_three_vaccinations', 'top_three_mortality')
+df_top_three
+
+```
+
+## Question 8
+
+In this question we wrote a function that takes in a data frame, a country, and two columns and returns a vector of cross correlations with time delays of up to 60 days. 
+The function would sort the data frame based on date in an ascending manner then filter the data frame based on the given country. The two columns would then be iterated over 121 times with different time delays and the cross calculations would then be calculated each time.
+In (b) we plotted the cross correlations as a function of time delays in a simple plot.
+
+```{r, warning=FALSE} 
+
+# 8a
+
+cross_cor <- function(df, country, col1, col2){
+  df <- df[order(df$date),]
+  filtered_df <- df %>% filter(location == country) %>% select(col1, col2, date)
+  day_range <- (-60:60)
+  cor_vector <- vector(mode = "integer", 121)
+  
+  num_of_obs <- length(filtered_df$date)
+  
+  placeholder <- 1
+  for (delta in day_range){
+    if (delta > 0){
+      cor_vector[placeholder] <- cor(filtered_df[[col1]][1:(num_of_obs-delta)], 
+                                         filtered_df[[col2]][(delta+1):num_of_obs], 
+                                         method="pearson",
+                                         use = "complete.obs")}
+    else{cor_vector[placeholder] <- cor(filtered_df[[col1]][(1-delta):num_of_obs], 
+                                         filtered_df[[col2]][1:(num_of_obs+delta)],
+                                         method="pearson",
+                                         use = "complete.obs")}
+    placeholder <- placeholder + 1  
+      
+  }
+  return(cor_vector)
+}
+
+#head(cross_cor(cases, 'High income', 'new_cases', 'new_deaths'))
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+# 8b 
+
+delta <- (-60:60)
+cc_world <- cross_cor(cases, 'World', 'new_cases_smoothed', 'new_deaths_smoothed')
+
+cc_world_time_delay_df <- data.frame(delta, cc_world)
+
+colnames(cc_world_time_delay_df) <- c("time_delay", "cross_cor")
+
+plot(x=cc_world_time_delay_df$time_delay, 
+     y=cc_world_time_delay_df$cross_cor, 
+     type='l', 
+     main='Cross correlation of new cases & new deaths in the world against time', 
+     xlab="Time delay in days", 
+     ylab='Cross correlation of new cases & new deaths')
+
+
+max_cc <- cc_world_time_delay_df[rev(order(cc_world_time_delay_df$cross_cor)),]
+head(max_cc, 1)
+```
+
+### Analysis and description of results:
+
+The final result shows that the greatest cross correlation value between new cases and new deaths, 0.3, is obtained with a time delay of 11 days. It is however a weak correlation as it is not close to 1, but it is however a positive time delay, which means that we see maximum correlations in positive time delays. This makes sense as the onset of the disease must take place before dying from it.
+
+
+## Question 9
+
+In (a), we provided a plot that illustrates the death rate of COVID-19 in all continents and the world as a whole. After filtering the main data frame "cases" of dates after January 2021, we filtered it based on continents and the already defined location called "World". We later created a column for the death rate and calculated it then plotted it against time with the locations as the third (colored) variable.
+
+```{r, warning=FALSE} 
+
+cases_after_jan_1st <- filter(cases, date >= "2021-01-01")
+
+valid_continents <- c("Europe", "Africa", "North America", 
+                      "South America", "Asia", "Oceania")
+
+cases_after_jan_1st_world <- subset(cases_after_jan_1st, 
+                                    location == "World") %>% select(c(date, 
+                                      location, 
+                                      total_cases,
+                                      total_deaths,
+                                      total_vaccinations_per_hundred))
+
+cases_after_jan_1st_continents <- select(subset(cases_after_jan_1st, location %in% valid_continents), 
+                                         c(date, location, total_cases, 
+                                           total_deaths, 
+                                           total_vaccinations_per_hundred))
+
+cases_after_jan_1st_continents$death_rate <- 
+  cases_after_jan_1st_continents$total_deaths/cases_after_jan_1st_continents$total_cases
+
+cases_after_jan_1st_world <- aggregate(cbind(total_deaths, total_cases, 
+                                             total_vaccinations_per_hundred)~date, 
+                                       data = cases_after_jan_1st_world, 
+                                       FUN = mean)
+
+cases_after_jan_1st_world$death_rate <- 
+  cases_after_jan_1st_world$total_deaths/cases_after_jan_1st_world$total_cases
+
+cases_after_jan_1st_world$location <- "World"
+world_and_continents <- rbind(cases_after_jan_1st_continents, cases_after_jan_1st_world)
+ggplot(data=world_and_continents, mapping = aes(x=date, y=death_rate,
+                                                colour=as.factor(location))) + geom_point(alpha=0.5) + 
+  labs(title = "Risk of a person diagnosed with COVID-19 to die from it", colour="Location", x="Time", y="Death rate")
+
+```
+
+### Analysis and description of results:
+
+In all continents except for Africa, there is a consistent pattern of a decreasing death rate over time. In Oceania, the death rate drops from a bit above 2% to almost zero percent. On the contrary, Africa has shown an increase in death rate followed by slow decrease which eventually makes it return to where it started in the beginning of the pandemic.
+Having a line for the world provides a general summary for this global decreasing pattern of dying from COVID-19.
+
+
+```{r, warning=FALSE}
+
+# 9B
+ggplot(data=world_and_continents, mapping = aes(x=date, y=total_vaccinations_per_hundred,
+                                                colour=as.factor(location))) + geom_point(alpha=0.5) + 
+  labs(title = "Total vaccinations per hundred per continent, world", colour="Location", x="Time", y="Total vaccinations per hundred")
+
+```
+
+The increase in vaccinations may provide an explanation for the decreasing risk of death from COVID-19 that we described above. As more people are vaccinated, less people are at risk of dying from COVID-19 even if they get infected, and that is the whole purpose of the vaccine. The slow decrease in 
+
+
+## Question 10
+
+In this question we dealt with excess mortality. 
+The first section includes a plot of total deaths per million against excess mortality per million. 
+3 countries which exceeded 2000 excess mortalities per million were then focused on in the second section.
+
+```{r, warning=FALSE} 
+
+total_deaths_per_mil =current$total_deaths_per_million        #x
+excess_mort =current$excess_mortality_cumulative_per_million  #y
+
+val = abs(excess_mort-total_deaths_per_mil)
+
+excess_mort_plot <- ggplot(current, 
+            aes(x =total_deaths_per_million, 
+                y= excess_mortality_cumulative_per_million, 
+                label = ifelse(val >= 2000, location,''))) + 
+  geom_point(aes(x = total_deaths_per_mil, 
+                 y = excess_mort, 
+                 colour = ifelse(val >= 2000, 'Above/below 2000','Within the range'))) + 
+  geom_text() + 
+  labs(title="Excess mortality explained by total of deaths", 
+       x ="Total deaths per million", 
+       y = "Cumulative excess mortality per million", 
+       colour="Range")
+
+excess_mortality_plot <- excess_mort_plot + geom_abline(slope = 1, intercept = 0) +
+  geom_abline(slope = 1, intercept = 2000)+
+  geom_abline(slope = 1, intercept = -2000)
+  
+
+excess_mortality_plot
+
+```
+
+```{r, warning=FALSE}
+
+# b
+
+# The countries we chose are Romania, Lithuania, and Bulgaria. They all have 100+ cumulative excess mortality per million observations.
+
+countries_above_2000_from_plot <- c("Egypt", "Belarus", "Azerbaijan", "Kazakhstan", 
+                                    "Bolivia", "Mexico", "Romania", "Lithuania", 
+                                    "Armenia", "Serbia", "Russia", "North Macedonia",
+                                    "Bulgaria", "South Africa")
+
+cases_loc_excess_mort <- na.omit(select(cases, c(location, 
+                                                 excess_mortality_cumulative_per_million)))
+counting_countries <- count(cases_loc_excess_mort, location)
+counting_countries <- subset(counting_countries, n>50)
+
+head(counting_countries)
+
+countries_with_50_plus_obs <- intersect(countries_above_2000_from_plot, counting_countries$location)
+
+print(countries_with_50_plus_obs)
+```
+
+From these countries, we picked Romania, Lithuania, and Bulgaria.
+We filtered the main COVID data frame "cases" to include these countries only.
+We then selected the 2 relevant columns "excess_mortality_cumulative_per_million" and "total_deaths_per_million" and plotted them against time. 
+We gave "excess_mortality_cumulative_per_million" a triangle shape and "total_deaths_per_million" a circular shape. 
+The 3 countries have different colors.
+
+```{r, warning=FALSE}
+
+cases_3_countries <- subset(cases, location == c("Romania", "Lithuania", "Bulgaria"))
+cases_3_countries <- mutate(cases_3_countries, date = format(as.Date(date), "%Y-%m" ))
+cases_3_countries <- select(cases_3_countries, c(date, location, total_deaths_per_million, excess_mortality_cumulative_per_million))
+
+ggplot(data=cases_3_countries, aes(x=date, colour=as.factor(location), shape=as.factor(location))) + 
+  geom_point(data=cases_3_countries, shape=16, aes(y=total_deaths_per_million)) +
+  geom_point(data=cases_3_countries, shape=2, aes(y=excess_mortality_cumulative_per_million)) +
+  labs(title="Total deaths and and excess mortality of chosen countries", 
+       colour="Countries & Shape") +
+  xlab("Time") + ylab("Count Per Million")
+
+
+```
+
+### Analysis and description of results:
+
+We can see that the only time that excess mortality was below the total deaths was before and during the early stages of the pandemic, and therefore the only time excess mortality was not explained by COVID-19 was before and during the beginning of the COVID-19 pandemic.
